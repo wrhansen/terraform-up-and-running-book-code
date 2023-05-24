@@ -2,10 +2,24 @@ provider "aws" {
   region = "us-east-1"
 }
 
-variable "server_port" {
-  description = "The port the server will use for HTTP requests"
-  type        = number
-  default     = 8080
+terraform {
+  backend "s3" {
+    bucket = "terraform-up-and-running-state-whansen"
+    key    = "stage/services/webserver-cluster/terraform.tfstate"
+    region = "us-east-1"
+
+    dynamodb_table = "terraform-up-and-running-locks"
+    encrypt        = true
+  }
+}
+
+data "terraform_remote_state" "db" {
+  backend = "s3"
+  config = {
+    bucket = "terraform-up-and-running-state-whansen"
+    key    = "stage/data-stores/mysql/terraform.tfstate"
+    region = "us-east-1"
+  }
 }
 
 data "aws_vpc" "default" {
@@ -55,11 +69,12 @@ resource "aws_launch_configuration" "example" {
   instance_type   = "t2.micro"
   security_groups = [aws_security_group.instance.id]
 
-  user_data = <<-EOF
-              #!/bin/bash
-              echo "Hello, World" > index.html
-              nohup busybox httpd -f -p ${var.server_port} &
-              EOF
+  # Render the User Data script as a template
+  user_data = templatefile("user-data.sh", {
+    server_port = var.server_port
+    db_address  = data.terraform_remote_state.db.outputs.address
+    db_port     = data.terraform_remote_state.db.outputs.port
+  })
 
   # required when using a launch configuration with an auto scaling group
   lifecycle {
@@ -138,9 +153,4 @@ resource "aws_lb_listener_rule" "asg" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.asg.arn
   }
-}
-
-output "alb_dns_name" {
-  value       = aws_lb.example.dns_name
-  description = "The domain name of the load balancer"
 }
