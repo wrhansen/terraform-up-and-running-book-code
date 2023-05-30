@@ -11,20 +11,37 @@ terraform {
 
 provider "aws" {
   region = "us-east-1"
+
+  # Tags to apply to all AWS resources by default
+  default_tags {
+    tags = {
+      Owner     = "team-foo"
+      ManagedBy = "Terraform"
+    }
+  }
 }
 
 # Use a module
 module "webserver_cluster" {
   source = "../../../modules/services/webserver-cluster"
 
+  ami         = "ami-0aa2b7722dc1b5612"
+  server_text = "New server text"
+
   # Config variables
   cluster_name           = "webservers-stage"
   db_remote_state_bucket = "terraform-up-and-running-state-whansen"
   db_remote_state_key    = "stage/data-stores/mysql/terraform.tfstate"
 
-  instance_type = "t2.micro"
-  min_size      = 2
-  max_size      = 2
+  instance_type      = "t2.micro"
+  min_size           = 2
+  max_size           = 2
+  enable_autoscaling = false
+
+  custom_tags = {
+    Owner     = "team-foo"
+    ManagedBy = "terraform"
+  }
 }
 
 # Expose an extra port (just in staging environment)!

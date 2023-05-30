@@ -68,7 +68,7 @@ resource "aws_security_group_rule" "allow_all_outbound" {
 
 
 resource "aws_launch_configuration" "example" {
-  image_id        = "ami-0aa2b7722dc1b5612"
+  image_id        = var.ami
   instance_type   = var.instance_type
   security_groups = [aws_security_group.instance.id]
 
@@ -77,6 +77,7 @@ resource "aws_launch_configuration" "example" {
     server_port = var.server_port
     db_address  = data.terraform_remote_state.db.outputs.address
     db_port     = data.terraform_remote_state.db.outputs.port
+    server_text = var.server_text
   })
 
   # required when using a launch configuration with an auto scaling group
@@ -86,6 +87,11 @@ resource "aws_launch_configuration" "example" {
 }
 
 resource "aws_autoscaling_group" "example" {
+  # Explicity depend on the launch configuration's name so each time it's
+  # replaced, this ASG is also replaced
+
+  name = var.cluster_name
+
   launch_configuration = aws_launch_configuration.example.name
   vpc_zone_identifier  = data.aws_subnets.default.ids
 
@@ -95,10 +101,29 @@ resource "aws_autoscaling_group" "example" {
   min_size = var.min_size
   max_size = var.max_size
 
+  # Use instance refresh to roll out changes to the ASG
+  instance_refresh {
+    strategy = "Rolling"
+    preferences {
+      min_healthy_percentage = 50
+    }
+  }
+
   tag {
     key                 = "Name"
-    value               = "${var.cluster_name}-example"
+    value               = var.cluster_name
     propagate_at_launch = true
+  }
+
+  # Dynamically create custom tags using for_each:
+  dynamic "tag" {
+    for_each = var.custom_tags
+
+    content {
+      key                 = tag.key
+      value               = tag.value
+      propagate_at_launch = true
+    }
   }
 }
 
@@ -156,4 +181,42 @@ resource "aws_lb_listener_rule" "asg" {
     type             = "forward"
     target_group_arn = aws_lb_target_group.asg.arn
   }
+}
+
+
+resource "aws_autoscaling_schedule" "scale_out_during_business_hours" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  scheduled_action_name  = "${var.cluster_name}-scale-out-during-business_hours"
+  min_size               = 2
+  max_size               = 10
+  desired_capacity       = 10
+  recurrence             = "0 9 * * *"
+  autoscaling_group_name = aws_autoscaling_group.example.name
+}
+
+resource "aws_autoscaling_schedule" "scale_in_at_night" {
+  count = var.enable_autoscaling ? 1 : 0
+
+  scheduled_action_name  = "${var.cluster_name}-scale-in-at-night"
+  min_size               = 2
+  max_size               = 10
+  desired_capacity       = 2
+  recurrence             = "0 17 * * *"
+  autoscaling_group_name = aws_autoscaling_group.example.name
+}
+
+# Conditionally give neo access cloudwatch IAM policies
+resource "aws_iam_user_policy_attachment" "neo_cloudwatch_full_access" {
+  count = var.give_neo_cloudwatch_full_access ? 1 : 0
+
+  user       = aws_iam_user.example[0].name
+  policy_arn = aws_iam_policy.cloudwatch_full_access.arn
+}
+
+resource "aws_iam_user_policy_attachment" "neo_cloudwatch_read_only" {
+  count = var.give_neo_cloudwatch_full_access ? 0 : 1
+
+  user       = aws_iam_user.example[0].name
+  policy_arn = aws_iam_policy.cloudwatch_read_only.arn
 }
