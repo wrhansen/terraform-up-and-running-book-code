@@ -7,6 +7,12 @@ terraform {
     dynamodb_table = "terraform-up-and-running-locks"
     encrypt        = true
   }
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.0"
+    }
+  }
 }
 
 provider "aws" {
@@ -16,6 +22,9 @@ provider "aws" {
 # Use webserver-cluster module
 module "webserver_cluster" {
   source = "../../../modules/services/webserver-cluster"
+
+  ami         = "ami-0aa2b7722dc1b5612"
+  server_text = "New server text PROD"
 
   # Config variables
   cluster_name           = "webservers-prod"
